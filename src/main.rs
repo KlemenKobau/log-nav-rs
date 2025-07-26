@@ -1,4 +1,4 @@
-use std::io::{IsTerminal, Read, stdin};
+use std::io::{Read, stdin};
 
 fn main() {
     let mut buffer = [0; 1000];
