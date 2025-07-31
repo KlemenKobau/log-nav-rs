@@ -16,7 +16,7 @@ fn main() -> anyhow::Result<()> {
 }
 
 fn spawn_file_reader_thread() -> anyhow::Result<Receiver<String>> {
-    let (sender, receiver) = mpsc::channel::<String>();
+    let (sender, receiver) = mpsc::sync_channel::<String>(10);
 
     let file = File::open("log.in")?;
     let mut reader = BufReader::new(file);
