@@ -1,19 +1,43 @@
-use std::fs::read_to_string;
+use std::{
+    fs::File,
+    io::{BufRead, BufReader},
+    sync::mpsc::{self, Receiver, SendError},
+    thread,
+};
 
-use fancy_regex::Regex;
+fn main() -> anyhow::Result<()> {
+    let receiver = spawn_file_reader_thread()?;
 
-fn main() {
-    let mut java_logs = read_to_string("log.in").unwrap();
-    let java_regex = read_to_string("java.txt").unwrap();
-
-    let re = Regex::new(&java_regex).unwrap();
-
-    loop {
-        let caps = re.captures(&java_logs).unwrap().unwrap();
-        let m = caps.get(0).unwrap();
-        println!("{:?}", m.as_str());
-        let end = m.end();
-
-        java_logs = java_logs[end..].into();
+    for e in receiver.iter() {
+        println!("{}", e);
     }
+
+    Ok(())
+}
+
+fn spawn_file_reader_thread() -> anyhow::Result<Receiver<String>> {
+    let (sender, receiver) = mpsc::channel::<String>();
+
+    let file = File::open("log.in")?;
+    let mut reader = BufReader::new(file);
+
+    thread::spawn(move || {
+        loop {
+            let mut buffer = String::new();
+
+            let res = reader.read_line(&mut buffer);
+            if let Err(err) = res {
+                eprintln!("Error reading line! {}", err);
+            }
+
+            // TODO clone could be removed by sending the buffer
+            let send_res = sender.send(buffer);
+
+            if let Err(SendError(error)) = send_res {
+                eprintln!("Error while sending! {}", error);
+            }
+        }
+    });
+
+    Ok(receiver)
 }
