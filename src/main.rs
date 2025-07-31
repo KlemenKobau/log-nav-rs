@@ -1,43 +1,84 @@
+use anyhow::Result;
+use notify::{EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use std::{
     fs::File,
     io::{BufRead, BufReader},
+    path::PathBuf,
     sync::mpsc::{self, Receiver, SendError},
     thread,
 };
 
-fn main() -> anyhow::Result<()> {
-    let receiver = spawn_file_reader_thread()?;
+fn main() -> Result<()> {
+    let receiver = spawn_file_reader_thread("log.in")?;
 
     for e in receiver.iter() {
-        println!("{}", e);
+        print!("{}", e);
     }
 
     Ok(())
 }
 
-fn spawn_file_reader_thread() -> anyhow::Result<Receiver<String>> {
-    let (sender, receiver) = mpsc::sync_channel::<String>(10);
+fn spawn_file_reader_thread<P: Into<PathBuf>>(path: P) -> Result<Receiver<String>> {
+    let path = path.into();
 
-    let file = File::open("log.in")?;
-    let mut reader = BufReader::new(file);
+    let (line_sender, line_receiver) = mpsc::sync_channel::<String>(10);
+    let notify_receiver = spawn_notify_thread(&path);
 
     thread::spawn(move || {
-        loop {
-            let mut buffer = String::new();
+        let file = File::open(&path).expect("Error opening file!");
+        let mut reader = BufReader::new(file);
 
-            let res = reader.read_line(&mut buffer);
-            if let Err(err) = res {
-                eprintln!("Error reading line! {}", err);
+        loop {
+            loop {
+                let mut buffer = String::new();
+                match reader.read_line(&mut buffer) {
+                    Ok(0) => {
+                        if let Err(SendError(line)) = line_sender.send(buffer) {
+                            eprintln!("Receiver dropped: {}", line);
+                            break;
+                        }
+                        break;
+                    }
+                    Ok(_) => {
+                        if let Err(SendError(line)) = line_sender.send(buffer) {
+                            eprintln!("Receiver dropped: {}", line);
+                            break;
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("Error reading line: {}", e);
+                        break;
+                    }
+                }
             }
 
-            // TODO clone could be removed by sending the buffer
-            let send_res = sender.send(buffer);
-
-            if let Err(SendError(error)) = send_res {
-                eprintln!("Error while sending! {}", error);
+            if let Err(err) = notify_receiver.recv() {
+                eprintln!("Error waiting for notification! {}", err);
             }
         }
     });
 
-    Ok(receiver)
+    Ok(line_receiver)
+}
+
+fn spawn_notify_thread<P: Into<PathBuf>>(
+    path: P,
+) -> Receiver<Result<notify::Event, notify::Error>> {
+    let (notify_sender, notify_receiver) = mpsc::channel();
+
+    let watch_path = path.into();
+    thread::spawn(move || {
+        let mut watcher =
+            notify::recommended_watcher(notify_sender).expect("Error creating watcher!");
+
+        watcher
+            .watch(&watch_path, RecursiveMode::NonRecursive)
+            .expect("Failed to watch file");
+
+        loop {
+            thread::park();
+        }
+    });
+
+    notify_receiver
 }
