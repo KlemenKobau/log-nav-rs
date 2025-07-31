@@ -30,15 +30,11 @@ fn spawn_file_reader_thread<P: Into<PathBuf>>(path: P) -> Result<Receiver<String
 
         loop {
             loop {
+                // TODO fix this. This will not read lines without \n, so it will not read the last line in the file.
+                // also problematic if the line is 1Gb big...
                 let mut buffer = String::new();
                 match reader.read_line(&mut buffer) {
-                    Ok(0) => {
-                        if let Err(SendError(line)) = line_sender.send(buffer) {
-                            eprintln!("Receiver dropped: {}", line);
-                            break;
-                        }
-                        break;
-                    }
+                    Ok(0) => break,
                     Ok(_) => {
                         if let Err(SendError(line)) = line_sender.send(buffer) {
                             eprintln!("Receiver dropped: {}", line);
